@@ -1,0 +1,56 @@
+version: '3.8'
+
+services:
+  # MongoDB Service
+  mongodb:
+    image: mongo:latest
+    container_name: walmart_mongodb
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+
+  # Hadoop Namenode
+  namenode:
+    image: bde2020/hadoop-namenode:2.0.0-hadoop3.2.1-java8
+    container_name: namenode
+    restart: always
+    ports:
+      - "9870:9870"
+      - "9000:9000"
+    volumes:
+      - hadoop_namenode:/hadoop/dfs/name
+    environment:
+      - CLUSTER_NAME=walmart_test
+    env_file:
+      - ./hadoop.env
+
+  # Hadoop Datanode
+  datanode:
+    image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
+    container_name: datanode
+    restart: always
+    ports:
+      - "9864:9864"
+    environment:
+      - SERVICE_PRECONDITION=namenode:9870
+    env_file:
+      - ./hadoop.env
+    volumes:
+      - hadoop_datanode:/hadoop/dfs/data
+
+  tester:
+    image: jupyter/pyspark-notebook:latest
+    container_name: walmart_tester
+    user: root
+    volumes:
+      - .:/app
+    working_dir: /app
+    environment:
+      - HADOOP_USER_NAME=root
+    command: /bin/sh -c "pip install pandas pymongo hdfs -i https://pypi.tuna.tsinghua.edu.cn/simple && sleep infinity"
+
+volumes:
+  mongodb_data:
+  hadoop_namenode:
+  hadoop_datanode:
