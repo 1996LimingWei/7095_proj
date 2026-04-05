@@ -9,6 +9,11 @@ services:
       - "27017:27017"
     volumes:
       - mongodb_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   # Hadoop Namenode
   namenode:
@@ -24,6 +29,11 @@ services:
       - CLUSTER_NAME=walmart_test
     env_file:
       - ./hadoop.env
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9870"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   # Hadoop Datanode
   datanode:
@@ -38,6 +48,42 @@ services:
       - ./hadoop.env
     volumes:
       - hadoop_datanode:/hadoop/dfs/data
+    depends_on:
+      namenode:
+        condition: service_healthy
+
+  # Data Upload Service - Automatically uploads preprocessed data to HDFS and MongoDB
+  data-upload:
+    image: jupyter/pyspark-notebook:latest
+    container_name: walmart_data_upload
+    user: root
+    volumes:
+      - .:/app
+      - hadoop_namenode:/hadoop/dfs/name
+    working_dir: /app
+    environment:
+      - HADOOP_USER_NAME=root
+      - MONGO_URI=mongodb://mongodb:27017
+    command: >
+      /bin/sh -c "
+        echo 'Installing dependencies...' &&
+        pip install pandas pymongo hdfs -q &&
+        echo 'Waiting for services to be ready...' &&
+        sleep 30 &&
+        echo 'Uploading preprocessed data to HDFS...' &&
+        python hdfs_upload/hdfs_upload.py --preprocessed-dir ./data/preprocessed --method webhdfs --hdfs-host namenode --hdfs-port 9870 &&
+        echo 'Loading preprocessed data into MongoDB...' &&
+        python mongodb_load/mongodb_data_load.py --preprocessed --local-dir ./data/preprocessed --mongo-uri mongodb://mongodb:27017 &&
+        echo 'Data upload complete!' &&
+        sleep infinity
+      "
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      namenode:
+        condition: service_healthy
+      datanode:
+        condition: service_started
 
   tester:
     image: jupyter/pyspark-notebook:latest
@@ -48,7 +94,17 @@ services:
     working_dir: /app
     environment:
       - HADOOP_USER_NAME=root
-    command: /bin/sh -c "pip install pandas pymongo hdfs -i https://pypi.tuna.tsinghua.edu.cn/simple && sleep infinity"
+      # Data source configuration for sales_forecasting.py
+      - DATA_SOURCE=mongodb
+      - MONGO_URI=mongodb://mongodb:27017
+      - DB_NAME=walmart_sales
+      - HDFS_HOST=namenode
+      - HDFS_PORT=9870
+      - HDFS_BASE=/user/walmart_sales
+    command: /bin/sh -c "pip install pandas pymongo hdfs scikit-learn xgboost matplotlib seaborn -i https://pypi.tuna.tsinghua.edu.cn/simple && sleep infinity"
+    depends_on:
+      data-upload:
+        condition: service_started
 
 volumes:
   mongodb_data:

@@ -13,7 +13,6 @@ data/
 *.tar.gz
 
 # Environment files
-.env
 .ipynb_checkpoints/
 
 # System files

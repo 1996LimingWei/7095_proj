@@ -9,10 +9,16 @@ team's data preprocessing pipeline:
   - Merged dataset via aggregation pipeline (train + features + stores)
   - Temporal features (Year, Month, Week)
 
+Supports both raw data loading (with preprocessing) and preprocessed data loading.
+
 Usage:
+    # Load raw data with preprocessing
     python mongodb_data_load.py --local-dir ./data
     python mongodb_data_load.py --mongo-uri "mongodb://user:pass@host:27017" --local-dir ./data
-    python mongodb_data_load.py --local-dir ./data --skip-schema
+
+    # Load preprocessed data directly
+    python mongodb_data_load.py --preprocessed --local-dir ./data/preprocessed
+    python mongodb_data_load.py --preprocessed --local-dir ./data/preprocessed --skip-schema
 
 Prerequisites:
     pip install pymongo pandas
@@ -28,7 +34,8 @@ from pymongo import MongoClient, UpdateOne
 
 from mongodb_schema import DB_NAME, create_collections
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+logging.basicConfig(level=logging.INFO,
+                    format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
 BATCH_SIZE = 5000
@@ -80,7 +87,8 @@ def load_stores(db, local_dir: str):
     ]
 
     result = collection.bulk_write(operations)
-    logger.info(f"  stores: {result.upserted_count} inserted, {result.modified_count} updated")
+    logger.info(
+        f"  stores: {result.upserted_count} inserted, {result.modified_count} updated")
 
 
 def load_features(db, local_dir: str):
@@ -138,14 +146,16 @@ def load_features(db, local_dir: str):
             operations = []
 
     total += bulk_upsert(collection, operations)
-    logger.info(f"  features: {total} documents written, {collection.count_documents({})} total")
+    logger.info(
+        f"  features: {total} documents written, {collection.count_documents({})} total")
 
 
 def load_sales(db, local_dir: str, filename: str, collection_name: str):
     """Load train.csv or test.csv into the specified collection."""
     filepath = os.path.join(local_dir, filename)
     df = pd.read_csv(filepath)
-    logger.info(f"Loading {len(df)} records from {filepath} -> '{collection_name}'")
+    logger.info(
+        f"Loading {len(df)} records from {filepath} -> '{collection_name}'")
 
     collection = db[collection_name]
     operations = []
@@ -163,7 +173,8 @@ def load_sales(db, local_dir: str, filename: str, collection_name: str):
 
         operations.append(
             UpdateOne(
-                {"Store": record["Store"], "Dept": record["Dept"], "Date": record["Date"]},
+                {"Store": record["Store"],
+                    "Dept": record["Dept"], "Date": record["Date"]},
                 {"$set": record},
                 upsert=True,
             )
@@ -174,11 +185,155 @@ def load_sales(db, local_dir: str, filename: str, collection_name: str):
             operations = []
 
     total += bulk_upsert(collection, operations)
-    logger.info(f"  {collection_name}: {total} documents written, {collection.count_documents({})} total")
+    logger.info(
+        f"  {collection_name}: {total} documents written, {collection.count_documents({})} total")
 
 
 # ================================================================
-# Merged dataset via aggregation pipeline
+# Load Preprocessed Data
+# ================================================================
+
+def load_preprocessed_merged_data(db, preprocessed_dir: str):
+    """
+    Load preprocessed merged_train.csv directly into merged_data collection.
+    The preprocessed data already contains all merged features and temporal fields.
+    """
+    filepath = os.path.join(preprocessed_dir, "merged_train.csv")
+    df = pd.read_csv(filepath)
+    logger.info(
+        f"Loading {len(df)} preprocessed merged records from {filepath}")
+
+    collection = db["merged_data"]
+    operations = []
+    total = 0
+
+    for _, row in df.iterrows():
+        record = {
+            "Store": int(row["Store"]),
+            "Dept": int(row["Dept"]),
+            "Date": parse_date(str(row["Date"])),
+            "Weekly_Sales": float(row["Weekly_Sales"]),
+            "IsHoliday": bool(row["IsHoliday_x"]) if "IsHoliday_x" in row else bool(row.get("IsHoliday", False)),
+            # Features
+            "Temperature": float(row["Temperature"]) if pd.notna(row.get("Temperature")) else None,
+            "Fuel_Price": float(row["Fuel_Price"]) if pd.notna(row.get("Fuel_Price")) else None,
+            "MarkDown1": float(row["MarkDown1"]) if pd.notna(row.get("MarkDown1")) else 0.0,
+            "MarkDown2": float(row["MarkDown2"]) if pd.notna(row.get("MarkDown2")) else 0.0,
+            "MarkDown3": float(row["MarkDown3"]) if pd.notna(row.get("MarkDown3")) else 0.0,
+            "MarkDown4": float(row["MarkDown4"]) if pd.notna(row.get("MarkDown4")) else 0.0,
+            "MarkDown5": float(row["MarkDown5"]) if pd.notna(row.get("MarkDown5")) else 0.0,
+            "hasMarkDown1": int(row["hasMarkDown1"]) if pd.notna(row.get("hasMarkDown1")) else 0,
+            "hasMarkDown2": int(row["hasMarkDown2"]) if pd.notna(row.get("hasMarkDown2")) else 0,
+            "hasMarkDown3": int(row["hasMarkDown3"]) if pd.notna(row.get("hasMarkDown3")) else 0,
+            "hasMarkDown4": int(row["hasMarkDown4"]) if pd.notna(row.get("hasMarkDown4")) else 0,
+            "hasMarkDown5": int(row["hasMarkDown5"]) if pd.notna(row.get("hasMarkDown5")) else 0,
+            "CPI": float(row["CPI"]) if pd.notna(row.get("CPI")) else None,
+            "Unemployment": float(row["Unemployment"]) if pd.notna(row.get("Unemployment")) else None,
+            # Store info
+            "Type": str(row["Type"]),
+            "Size": int(row["Size"]),
+            # Temporal features
+            "Year": int(row["Year"]),
+            "Month": int(row["Month"]),
+            "Week": int(row["Week"]),
+        }
+
+        operations.append(
+            UpdateOne(
+                {"Store": record["Store"],
+                    "Dept": record["Dept"], "Date": record["Date"]},
+                {"$set": record},
+                upsert=True,
+            )
+        )
+
+        if len(operations) >= BATCH_SIZE:
+            total += bulk_upsert(collection, operations)
+            operations = []
+
+    total += bulk_upsert(collection, operations)
+    logger.info(
+        f"  merged_data: {total} documents written, {collection.count_documents({})} total")
+    return total
+
+
+def load_preprocessed_features(db, preprocessed_dir: str):
+    """Load preprocessed features_cleaned.csv into features collection."""
+    filepath = os.path.join(preprocessed_dir, "features_cleaned.csv")
+    df = pd.read_csv(filepath)
+    logger.info(
+        f"Loading {len(df)} preprocessed feature records from {filepath}")
+
+    collection = db["features"]
+    operations = []
+    total = 0
+
+    for _, row in df.iterrows():
+        date_val = parse_date(str(row["Date"]))
+
+        record = {
+            "Store": int(row["Store"]),
+            "Date": date_val,
+            "Temperature": float(row["Temperature"]) if pd.notna(row.get("Temperature")) else None,
+            "Fuel_Price": float(row["Fuel_Price"]) if pd.notna(row.get("Fuel_Price")) else None,
+            "CPI": float(row["CPI"]) if pd.notna(row.get("CPI")) else None,
+            "Unemployment": float(row["Unemployment"]) if pd.notna(row.get("Unemployment")) else None,
+            "IsHoliday": bool(row["IsHoliday"]),
+        }
+
+        # Process MarkDown columns with indicators
+        for i in range(1, 6):
+            md_col = f"MarkDown{i}"
+            has_col = f"hasMarkDown{i}"
+            record[md_col] = float(row[md_col]) if pd.notna(
+                row.get(md_col)) else 0.0
+            record[has_col] = int(row[has_col]) if pd.notna(
+                row.get(has_col)) else 0
+
+        operations.append(
+            UpdateOne(
+                {"Store": record["Store"], "Date": record["Date"]},
+                {"$set": record},
+                upsert=True,
+            )
+        )
+
+        if len(operations) >= BATCH_SIZE:
+            total += bulk_upsert(collection, operations)
+            operations = []
+
+    total += bulk_upsert(collection, operations)
+    logger.info(
+        f"  features: {total} documents written, {collection.count_documents({})} total")
+
+
+def load_preprocessed_stores(db, preprocessed_dir: str):
+    """Load preprocessed stores.csv into stores collection."""
+    filepath = os.path.join(preprocessed_dir, "stores.csv")
+    df = pd.read_csv(filepath)
+    logger.info(f"Loading {len(df)} stores from {filepath}")
+
+    collection = db["stores"]
+    operations = [
+        UpdateOne(
+            {"Store": int(row["Store"])},
+            {"$set": {
+                "Store": int(row["Store"]),
+                "Type": str(row["Type"]),
+                "Size": int(row["Size"]),
+            }},
+            upsert=True,
+        )
+        for _, row in df.iterrows()
+    ]
+
+    result = collection.bulk_write(operations)
+    logger.info(
+        f"  stores: {result.upserted_count} inserted, {result.modified_count} updated")
+
+
+# ================================================================
+# Merged dataset via aggregation pipeline (for raw data)
 # ================================================================
 
 def create_merged_data(db):
@@ -326,10 +481,13 @@ def main():
                         help="Local directory containing CSV files (default: ./data)")
     parser.add_argument("--skip-schema", action="store_true",
                         help="Skip schema/index creation (if already initialized)")
+    parser.add_argument("--preprocessed", action="store_true",
+                        help="Load preprocessed data from local-dir (expects merged_train.csv, features_cleaned.csv, stores.csv)")
     args = parser.parse_args()
 
-    logger.info(f"MongoDB URI  : {args.mongo_uri}")
+    logger.info(f"MongoDB URI   : {args.mongo_uri}")
     logger.info(f"Data directory: {args.local_dir}")
+    logger.info(f"Preprocessed  : {args.preprocessed}")
 
     client = MongoClient(args.mongo_uri)
     db = client[DB_NAME]
@@ -341,16 +499,28 @@ def main():
     else:
         logger.info("Step 1/4: Skipped (--skip-schema)")
 
-    # Step 2: Load raw data into collections
-    logger.info("Step 2/4: Loading raw CSV data into collections...")
-    load_stores(db, args.local_dir)
-    load_features(db, args.local_dir)
-    load_sales(db, args.local_dir, "train.csv", "train_sales")
-    load_sales(db, args.local_dir, "test.csv", "test_sales")
+    if args.preprocessed:
+        # Load preprocessed data directly
+        logger.info(
+            "Step 2/4: Loading preprocessed CSV data into collections...")
+        load_preprocessed_stores(db, args.local_dir)
+        load_preprocessed_features(db, args.local_dir)
+        load_preprocessed_merged_data(db, args.local_dir)
+        # Note: test_sales is not available in preprocessed data
+        logger.info(
+            "  Note: test_sales not loaded (not available in preprocessed data)")
+    else:
+        # Step 2: Load raw data into collections
+        logger.info("Step 2/4: Loading raw CSV data into collections...")
+        load_stores(db, args.local_dir)
+        load_features(db, args.local_dir)
+        load_sales(db, args.local_dir, "train.csv", "train_sales")
+        load_sales(db, args.local_dir, "test.csv", "test_sales")
 
-    # Step 3: Create merged dataset
-    logger.info("Step 3/4: Creating merged dataset (train + features + stores)...")
-    create_merged_data(db)
+        # Step 3: Create merged dataset
+        logger.info(
+            "Step 3/4: Creating merged dataset (train + features + stores)...")
+        create_merged_data(db)
 
     # Step 4: Print summary
     logger.info("Step 4/4: Verification...")

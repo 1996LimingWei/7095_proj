@@ -46,8 +46,8 @@ FEATURES_VALIDATOR = {
         "properties": {
             "Store": {"bsonType": "int"},
             "Date": {"bsonType": "date"},
-            "Temperature": {"bsonType": "double"},
-            "Fuel_Price": {"bsonType": "double"},
+            "Temperature": {"bsonType": ["double", "null"]},
+            "Fuel_Price": {"bsonType": ["double", "null"]},
             "MarkDown1": {"bsonType": ["double", "null"]},
             "MarkDown2": {"bsonType": ["double", "null"]},
             "MarkDown3": {"bsonType": ["double", "null"]},
@@ -58,8 +58,8 @@ FEATURES_VALIDATOR = {
             "hasMarkDown3": {"bsonType": "int"},
             "hasMarkDown4": {"bsonType": "int"},
             "hasMarkDown5": {"bsonType": "int"},
-            "CPI": {"bsonType": "double"},
-            "Unemployment": {"bsonType": "double"},
+            "CPI": {"bsonType": ["double", "null"]},
+            "Unemployment": {"bsonType": ["double", "null"]},
             "IsHoliday": {"bsonType": "bool"},
         },
     }
@@ -151,7 +151,8 @@ COLLECTIONS = {
     "features": {
         "validator": FEATURES_VALIDATOR,
         "indexes": [
-            {"keys": [("Store", ASCENDING), ("Date", ASCENDING)], "unique": True},
+            {"keys": [("Store", ASCENDING), ("Date", ASCENDING)],
+             "unique": True},
             {"keys": [("Date", ASCENDING)]},
             {"keys": [("IsHoliday", ASCENDING)]},
             # For markdown presence queries
@@ -161,7 +162,8 @@ COLLECTIONS = {
     "train_sales": {
         "validator": TRAIN_SALES_VALIDATOR,
         "indexes": [
-            {"keys": [("Store", ASCENDING), ("Dept", ASCENDING), ("Date", ASCENDING)], "unique": True},
+            {"keys": [("Store", ASCENDING), ("Dept", ASCENDING),
+                      ("Date", ASCENDING)], "unique": True},
             {"keys": [("Date", ASCENDING)]},
             {"keys": [("Store", ASCENDING)]},
             {"keys": [("Dept", ASCENDING)]},
@@ -173,7 +175,8 @@ COLLECTIONS = {
     "test_sales": {
         "validator": TEST_SALES_VALIDATOR,
         "indexes": [
-            {"keys": [("Store", ASCENDING), ("Dept", ASCENDING), ("Date", ASCENDING)], "unique": True},
+            {"keys": [("Store", ASCENDING), ("Dept", ASCENDING),
+                      ("Date", ASCENDING)], "unique": True},
             {"keys": [("Date", ASCENDING)]},
         ],
     },
@@ -181,13 +184,15 @@ COLLECTIONS = {
         "validator": MERGED_DATA_VALIDATOR,
         "indexes": [
             # Primary key
-            {"keys": [("Store", ASCENDING), ("Dept", ASCENDING), ("Date", ASCENDING)], "unique": True},
+            {"keys": [("Store", ASCENDING), ("Dept", ASCENDING),
+                      ("Date", ASCENDING)], "unique": True},
             # Query: avg sales by store type
             {"keys": [("Type", ASCENDING), ("Weekly_Sales", DESCENDING)]},
             # Query: holiday vs non-holiday sales
             {"keys": [("IsHoliday", ASCENDING), ("Weekly_Sales", DESCENDING)]},
             # Query: markdown impact on sales
-            {"keys": [("hasMarkDown1", ASCENDING), ("Weekly_Sales", DESCENDING)]},
+            {"keys": [("hasMarkDown1", ASCENDING),
+                      ("Weekly_Sales", DESCENDING)]},
             # Query: time-series trend analysis
             {"keys": [("Date", ASCENDING)]},
             {"keys": [("Year", ASCENDING), ("Month", ASCENDING)]},
@@ -212,7 +217,8 @@ def create_collections(mongo_uri: str = "mongodb://localhost:27017"):
             print(f"[+] Created collection: {coll_name}")
         except CollectionInvalid:
             db.command("collMod", coll_name, validator=config["validator"])
-            print(f"[~] Updated validator for existing collection: {coll_name}")
+            print(
+                f"[~] Updated validator for existing collection: {coll_name}")
 
         # Create indexes
         collection = db[coll_name]
@@ -230,7 +236,8 @@ def create_collections(mongo_uri: str = "mongodb://localhost:27017"):
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(description="Initialize MongoDB schema for Walmart Sales project")
+    parser = argparse.ArgumentParser(
+        description="Initialize MongoDB schema for Walmart Sales project")
     parser.add_argument("--mongo-uri", default="mongodb://localhost:27017",
                         help="MongoDB connection URI")
     args = parser.parse_args()
