@@ -5,7 +5,7 @@ This module implements a complete ML pipeline for retail sales forecasting using
 the Walmart Recruiting dataset. It includes basic feature engineering, model training,
 evaluation, and prediction generation.
 
-Uses baseline features only:
+Uses  features only:
 - Store characteristics (Store, Dept, Size, Type)
 - Temporal features (Year, Month, Week, etc.)
 - Economic indicators (Temperature, Fuel_Price, CPI, Unemployment)
@@ -325,7 +325,7 @@ def create_rolling_features(df: pd.DataFrame, group_cols: List[str],
 
 def feature_engineering(train_df: pd.DataFrame, test_df: Optional[pd.DataFrame] = None) -> Tuple[pd.DataFrame, Optional[pd.DataFrame], List[str]]:
     """
-    Complete baseline feature engineering pipeline (no lag/rolling features).
+    Complete  feature engineering pipeline (no lag/rolling features).
 
     Args:
         train_df: Training dataframe
@@ -335,7 +335,7 @@ def feature_engineering(train_df: pd.DataFrame, test_df: Optional[pd.DataFrame] 
         Tuple of (train_features, test_features, feature_columns)
     """
     print("=" * 60)
-    print("FEATURE ENGINEERING (BASELINE FEATURES ONLY)")
+    print("FEATURE ENGINEERING ( FEATURES ONLY)")
     print("=" * 60)
 
     # Step 1: Extract temporal features
@@ -363,7 +363,7 @@ def feature_engineering(train_df: pd.DataFrame, test_df: Optional[pd.DataFrame] 
         if test_df is not None and col in test_df.columns:
             test_df[col] = test_df[col].astype(int)
 
-    # Define baseline feature columns only (16 features)
+    # Define feature columns
     feature_cols = [
         # Store and Dept
         'Store', 'Dept', 'Size', 'Type_encoded',
