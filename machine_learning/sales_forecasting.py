@@ -363,7 +363,7 @@ def feature_engineering(train_df: pd.DataFrame, test_df: Optional[pd.DataFrame] 
         if test_df is not None and col in test_df.columns:
             test_df[col] = test_df[col].astype(int)
 
-    # Define feature columns
+    # Define  feature columns only (16 features)
     feature_cols = [
         # Store and Dept
         'Store', 'Dept', 'Size', 'Type_encoded',
