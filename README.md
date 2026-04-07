@@ -1,6 +1,10 @@
 # Walmart Sales Forecasting - Quick Start Guide
 
-A big data pipeline for retail sales forecasting using the Walmart Recruiting dataset.
+A big data pipeline for retail sales forecasting using the Walmart Recruiting dataset with baseline machine learning models.
+
+## Overview
+
+This project implements a straightforward ML pipeline using 16 baseline features (no lag or rolling features) achieving excellent performance with XGBoost and RandomForest models (R² ~0.97).
 
 ## Prerequisites
 
@@ -57,7 +61,47 @@ docker-compose down
 ## Output
 
 Results are saved to `output/`:
-- `model_comparison.csv` - Model performance metrics
-- `feature_importance_*.png` - Feature importance charts
-- `predictions_vs_actual_*.png` - Prediction quality plots
+- `model_comparison.csv` - Model performance metrics (MAE, RMSE, R², Accuracy, Precision, Recall, F1)
+- `feature_importance_*.png` - Feature importance charts for tree-based models
+- `predictions_vs_actual_XGBoost.png` - Prediction quality plot for best model
 - `predictions.csv` - Test set predictions
+
+## Model Performance (Baseline 16 Features)
+
+| Model | Test R² | Test MAE | Test Accuracy | Test F1 |
+|-------|---------|----------|---------------|---------|
+| Linear Regression | 0.0899 | 1524.37 | 0.68 | 0.68 |
+| Ridge | 0.0899 | 1524.34 | 0.68 | 0.68 |
+| Random Forest | **0.9780** | **569.34** | **0.97** | **0.98** |
+| Gradient Boosting | 0.9092 | 1077.18 | 0.94 | 0.94 |
+| **XGBoost** | **0.9678** | **739.07** | **0.96** | **0.96** |
+
+## Features Used (Baseline Only - 16 Features)
+
+- **Store Characteristics**: Store, Dept, Size, Type (encoded)
+- **Temporal**: Year, Month, Week, Day, DayOfYear, Quarter, Season
+- **Economic Indicators**: Temperature, Fuel_Price, CPI, Unemployment
+- **Markdown/Promotions**: MarkDown1-5 and indicators
+- **Holiday**: IsHoliday
+
+## Key Insight
+
+Random Forest and XGBoost achieve excellent performance (R² > 0.96) using only baseline features, demonstrating that complex temporal feature engineering (lag/rolling features) is not necessary for this dataset. The simple baseline approach is sufficient for a school project while maintaining high accuracy.
+
+## Project Structure
+
+```
+.
+├── Data_preprocess_visualization.ipynb   # Data preprocessing
+├── machine_learning/
+│   └── sales_forecasting.py              # ML pipeline (baseline features)
+├── hdfs_upload/                          # HDFS upload scripts
+├── mongodb_load/                         # MongoDB load scripts
+├── docker-compose.yml                    # Docker services
+└── data/
+    └── preprocessed/                     # Preprocessed data output
+```
+
+## Team
+
+7095 Team: Wei Liming, Ke Linyao, Huo Weijia, Xu Hao, Zhang Hongyang

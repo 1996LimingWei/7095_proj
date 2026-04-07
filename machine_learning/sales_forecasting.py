@@ -2,8 +2,15 @@
 Walmart Sales Forecasting - Machine Learning Pipeline
 
 This module implements a complete ML pipeline for retail sales forecasting using
-the Walmart Recruiting dataset. It includes feature engineering, model training,
+the Walmart Recruiting dataset. It includes basic feature engineering, model training,
 evaluation, and prediction generation.
+
+Uses baseline features only:
+- Store characteristics (Store, Dept, Size, Type)
+- Temporal features (Year, Month, Week, etc.)
+- Economic indicators (Temperature, Fuel_Price, CPI, Unemployment)
+- Markdown promotions
+- Holiday indicators
 
 Supports loading data from:
 - HDFS (Hadoop Distributed File System)
@@ -34,7 +41,8 @@ from sklearn.model_selection import train_test_split, cross_val_score, GridSearc
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.linear_model import LinearRegression, Ridge
 from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
-from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+from sklearn.metrics import (mean_absolute_error, mean_squared_error, r2_score,
+                             accuracy_score, precision_score, recall_score, f1_score)
 import xgboost as xgb
 
 # Try to load environment variables from .env file
@@ -317,7 +325,7 @@ def create_rolling_features(df: pd.DataFrame, group_cols: List[str],
 
 def feature_engineering(train_df: pd.DataFrame, test_df: Optional[pd.DataFrame] = None) -> Tuple[pd.DataFrame, Optional[pd.DataFrame], List[str]]:
     """
-    Complete feature engineering pipeline.
+    Complete baseline feature engineering pipeline (no lag/rolling features).
 
     Args:
         train_df: Training dataframe
@@ -327,10 +335,10 @@ def feature_engineering(train_df: pd.DataFrame, test_df: Optional[pd.DataFrame] 
         Tuple of (train_features, test_features, feature_columns)
     """
     print("=" * 60)
-    print("FEATURE ENGINEERING")
+    print("FEATURE ENGINEERING (BASELINE FEATURES ONLY)")
     print("=" * 60)
 
-    # Step 1: Extract temporal features (matching notebook section 1.5)
+    # Step 1: Extract temporal features
     print("Step 1: Extracting temporal features...")
     train_df = extract_temporal_features(train_df)
     if test_df is not None:
@@ -355,52 +363,7 @@ def feature_engineering(train_df: pd.DataFrame, test_df: Optional[pd.DataFrame] 
         if test_df is not None and col in test_df.columns:
             test_df[col] = test_df[col].astype(int)
 
-    # Step 3: Create lag features for training data
-    print("Step 3: Creating lag features...")
-    train_df = train_df.sort_values(by=['Store', 'Dept', 'Date'])
-    train_df = create_lag_features(
-        train_df, ['Store', 'Dept'], 'Weekly_Sales', [1, 2, 4, 8])
-
-    # Step 4: Create rolling features
-    print("Step 4: Creating rolling window features...")
-    train_df = create_rolling_features(
-        train_df, ['Store', 'Dept'], 'Weekly_Sales', [4, 8, 12])
-
-    # Step 5: Create store-level aggregations
-    print("Step 5: Creating store-level aggregations...")
-    store_stats = train_df.groupby('Store')['Weekly_Sales'].agg(
-        ['mean', 'std', 'min', 'max']).reset_index()
-    store_stats.columns = ['Store', 'Store_Sales_Mean',
-                           'Store_Sales_Std', 'Store_Sales_Min', 'Store_Sales_Max']
-
-    train_df = train_df.merge(store_stats, on='Store', how='left')
-    if test_df is not None:
-        test_df = test_df.merge(store_stats, on='Store', how='left')
-
-    # Step 6: Create department-level aggregations
-    print("Step 6: Creating department-level aggregations...")
-    dept_stats = train_df.groupby('Dept')['Weekly_Sales'].agg([
-        'mean', 'std']).reset_index()
-    dept_stats.columns = ['Dept', 'Dept_Sales_Mean', 'Dept_Sales_Std']
-
-    train_df = train_df.merge(dept_stats, on='Dept', how='left')
-    if test_df is not None:
-        test_df = test_df.merge(dept_stats, on='Dept', how='left')
-
-    # Step 7: Create store-dept combination aggregations
-    print("Step 7: Creating store-dept combination features...")
-    store_dept_stats = train_df.groupby(['Store', 'Dept'])[
-        'Weekly_Sales'].agg(['mean', 'std']).reset_index()
-    store_dept_stats.columns = ['Store', 'Dept',
-                                'Store_Dept_Sales_Mean', 'Store_Dept_Sales_Std']
-
-    train_df = train_df.merge(store_dept_stats, on=[
-                              'Store', 'Dept'], how='left')
-    if test_df is not None:
-        test_df = test_df.merge(store_dept_stats, on=[
-                                'Store', 'Dept'], how='left')
-
-    # Define feature columns for modeling
+    # Define baseline feature columns only (16 features)
     feature_cols = [
         # Store and Dept
         'Store', 'Dept', 'Size', 'Type_encoded',
@@ -416,37 +379,25 @@ def feature_engineering(train_df: pd.DataFrame, test_df: Optional[pd.DataFrame] 
         'hasMarkDown1', 'hasMarkDown2', 'hasMarkDown3', 'hasMarkDown4', 'hasMarkDown5',
 
         # Holiday
-        'IsHoliday_x',
-
-        # Lag features
-        'Weekly_Sales_lag_1', 'Weekly_Sales_lag_2', 'Weekly_Sales_lag_4', 'Weekly_Sales_lag_8',
-
-        # Rolling features
-        'Weekly_Sales_rolling_mean_4', 'Weekly_Sales_rolling_mean_8', 'Weekly_Sales_rolling_mean_12',
-        'Weekly_Sales_rolling_std_4', 'Weekly_Sales_rolling_std_8', 'Weekly_Sales_rolling_std_12',
-
-        # Aggregated features
-        'Store_Sales_Mean', 'Store_Sales_Std', 'Store_Sales_Min', 'Store_Sales_Max',
-        'Dept_Sales_Mean', 'Dept_Sales_Std',
-        'Store_Dept_Sales_Mean', 'Store_Dept_Sales_Std'
+        'IsHoliday_x'
     ]
 
     # Filter to only include columns that exist in the dataframe
     feature_cols = [col for col in feature_cols if col in train_df.columns]
 
     # Handle missing values
-    print("Step 8: Handling missing values...")
+    print("Step 3: Handling missing values...")
     for col in feature_cols:
         if col in train_df.columns:
             train_df[col] = train_df[col].fillna(0)
 
-    # For test data: fill available features with 0 and add missing lag/rolling columns with 0
+    # For test data: fill available features with 0
     if test_df is not None:
         for col in feature_cols:
             if col in test_df.columns:
                 test_df[col] = test_df[col].fillna(0)
             else:
-                # Add missing columns (lag/rolling features) with 0 values
+                # Add missing columns with 0 values
                 test_df[col] = 0
 
     print(f"Feature engineering complete. Total features: {len(feature_cols)}")
@@ -503,7 +454,7 @@ def evaluate_model(model, X_train: pd.DataFrame, X_test: pd.DataFrame,
     y_train_pred = model.predict(X_train)
     y_test_pred = model.predict(X_test)
 
-    # Calculate metrics
+    # Calculate regression metrics
     metrics = {
         'Model': model_name,
         'Train_MAE': mean_absolute_error(y_train, y_train_pred),
@@ -513,6 +464,24 @@ def evaluate_model(model, X_train: pd.DataFrame, X_test: pd.DataFrame,
         'Train_R2': r2_score(y_train, y_train_pred),
         'Test_R2': r2_score(y_test, y_test_pred)
     }
+
+    # Calculate classification metrics (categorize as Low/Medium/High sales)
+    quartile_25 = np.percentile(y_test, 25)
+    quartile_75 = np.percentile(y_test, 75)
+
+    y_test_cat = np.digitize(y_test.values, [quartile_25, quartile_75]) - 1
+    y_pred_cat = np.digitize(y_test_pred, [quartile_25, quartile_75]) - 1
+
+    y_test_cat = np.clip(y_test_cat, 0, 2)
+    y_pred_cat = np.clip(y_pred_cat, 0, 2)
+
+    metrics['Test_Accuracy'] = accuracy_score(y_test_cat, y_pred_cat)
+    metrics['Test_Precision'] = precision_score(
+        y_test_cat, y_pred_cat, average='weighted', zero_division=0)
+    metrics['Test_Recall'] = recall_score(
+        y_test_cat, y_pred_cat, average='weighted', zero_division=0)
+    metrics['Test_F1'] = f1_score(
+        y_test_cat, y_pred_cat, average='weighted', zero_division=0)
 
     return metrics
 
@@ -783,13 +752,13 @@ def main():
             plot_feature_importance(
                 model, X_train.columns.tolist(), model_name, output_dir)
 
-    # Step 9: Plot predictions vs actual for best model
+    # Step 10: Plot predictions vs actual for best model
     best_model = models[best_model_name]
     y_pred = best_model.predict(X_test)
     plot_predictions_vs_actual(
         y_test.values, y_pred, best_model_name, output_dir)
 
-    # Step 10: Generate predictions on test set using best model
+    # Step 11: Generate predictions on test set using best model
     print("\nGenerating predictions on test set...")
     if test_fe is not None:
         predictions = generate_predictions(
