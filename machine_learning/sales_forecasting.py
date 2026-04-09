@@ -5,12 +5,11 @@ This module implements a complete ML pipeline for retail sales forecasting using
 the Walmart Recruiting dataset. It includes basic feature engineering, model training,
 evaluation, and prediction generation.
 
-Uses  features only:
-- Store characteristics (Store, Dept, Size, Type)
-- Temporal features (Year, Month, Week, etc.)
-- Economic indicators (Temperature, Fuel_Price, CPI, Unemployment)
-- Markdown promotions
-- Holiday indicators
+Uses features dynamically selected through computed correlation analysis:
+- Pipeline calculates correlations between all features and Weekly_Sales
+- Removes features with |correlation| < threshold (default: 0.01)
+- Removes redundant features (inter-correlation > threshold, default: 0.95)
+- Result: Data-driven feature count (typically 10-15 features) for optimal model performance
 
 Supports loading data from:
 - HDFS (Hadoop Distributed File System)
@@ -225,9 +224,8 @@ def prepare_test_data(test: pd.DataFrame, features_cleaned: pd.DataFrame,
     # Merge with stores on Store
     test_merged = pd.merge(test_merged, stores, on='Store', how='left')
 
-    # Rename IsHoliday column to match training data
-    if 'IsHoliday' in test_merged.columns:
-        test_merged.rename(columns={'IsHoliday': 'IsHoliday_x'}, inplace=True)
+    # IsHoliday column will be handled in feature_engineering
+    # No rename needed, keep as IsHoliday
 
     print(f"Prepared Test shape: {test_merged.shape}")
     return test_merged
@@ -323,19 +321,150 @@ def create_rolling_features(df: pd.DataFrame, group_cols: List[str],
     return df
 
 
-def feature_engineering(train_df: pd.DataFrame, test_df: Optional[pd.DataFrame] = None) -> Tuple[pd.DataFrame, Optional[pd.DataFrame], List[str]]:
+def analyze_feature_correlations(df: pd.DataFrame, output_dir: str = 'output',
+                                 correlation_threshold: float = 0.95,
+                                 min_target_correlation: float = 0.01) -> Tuple[pd.Series, List[str]]:
     """
-    Complete  feature engineering pipeline (no lag/rolling features).
+    Analyze correlations and automatically select optimal features.
+
+    Selection criteria:
+    1. Remove features with |correlation with target| < min_target_correlation
+    2. Remove redundant features (inter-correlation > correlation_threshold)
+    3. Keep features with highest correlation to target when removing redundancies
+
+    Args:
+        df: DataFrame with features and Weekly_Sales target
+        output_dir: Directory to save correlation heatmap
+        correlation_threshold: Threshold for considering features redundant (default: 0.95)
+        min_target_correlation: Minimum |correlation| with target to keep feature (default: 0.01)
+
+    Returns:
+        Tuple of (all_correlations, selected_feature_list)
+    """
+    print("\n" + "=" * 60)
+    print("FEATURE CORRELATION ANALYSIS & SELECTION")
+    print("=" * 60)
+    print(f"Selection criteria:")
+    print(f"  - Min |correlation with Weekly_Sales|: {min_target_correlation}")
+    print(f"  - Max inter-feature correlation: {correlation_threshold}")
+
+    # Get numeric columns only
+    numeric_df = df.select_dtypes(include=[np.number])
+
+    if 'Weekly_Sales' not in numeric_df.columns:
+        print("Warning: Weekly_Sales not found in numeric columns")
+        return pd.Series(), []
+
+    # Calculate correlation with Weekly_Sales
+    target_correlations = numeric_df.corr()['Weekly_Sales'].drop(
+        'Weekly_Sales', errors='ignore')
+    target_correlations = target_correlations.sort_values(
+        key=lambda x: abs(x), ascending=False)
+
+    print("\nAll features by correlation with Weekly_Sales:")
+    print("-" * 50)
+    for feature, corr in target_correlations.items():
+        marker = ""
+        if abs(corr) < min_target_correlation:
+            marker = " [LOW - will remove]"
+        print(f"  {feature:20s}: {corr:7.4f}{marker}")
+
+    # Step 1: Filter by target correlation threshold
+    selected_features = target_correlations[abs(
+        target_correlations) >= min_target_correlation].index.tolist()
+    removed_low_corr = set(target_correlations.index) - set(selected_features)
+
+    print(
+        f"\nStep 1: Removed {len(removed_low_corr)} features with |correlation| < {min_target_correlation}")
+    for feat in removed_low_corr:
+        print(f"  - {feat}: {target_correlations[feat]:.4f}")
+
+    # Step 2: Remove redundant features (high inter-correlation)
+    if len(selected_features) > 1:
+        feature_corr_matrix = numeric_df[selected_features].corr().abs()
+
+        # Iterate through features and remove redundant ones
+        features_to_remove = set()
+        for i, feat_i in enumerate(selected_features):
+            if feat_i in features_to_remove:
+                continue
+            for feat_j in selected_features[i+1:]:
+                if feat_j in features_to_remove:
+                    continue
+                if feature_corr_matrix.loc[feat_i, feat_j] > correlation_threshold:
+                    # Remove the one with lower target correlation
+                    if abs(target_correlations[feat_i]) >= abs(target_correlations[feat_j]):
+                        features_to_remove.add(feat_j)
+                        print(
+                            f"  - {feat_j} redundant with {feat_i} (corr={feature_corr_matrix.loc[feat_i, feat_j]:.3f})")
+                    else:
+                        features_to_remove.add(feat_i)
+                        print(
+                            f"  - {feat_i} redundant with {feat_j} (corr={feature_corr_matrix.loc[feat_i, feat_j]:.3f})")
+
+        selected_features = [
+            f for f in selected_features if f not in features_to_remove]
+        print(
+            f"\nStep 2: Removed {len(features_to_remove)} redundant features (inter-correlation > {correlation_threshold})")
+
+    print(f"\nFinal selected features ({len(selected_features)} total):")
+    for feat in selected_features:
+        print(f"  - {feat}: {target_correlations[feat]:.4f}")
+
+    # Generate correlation heatmap for selected features
+    os.makedirs(output_dir, exist_ok=True)
+
+    if len(selected_features) > 0:
+        plot_features = selected_features + ['Weekly_Sales']
+        plot_features = [f for f in plot_features if f in numeric_df.columns]
+        corr_matrix = numeric_df[plot_features].corr()
+
+        plt.figure(figsize=(12, 10))
+        mask = np.triu(np.ones_like(corr_matrix, dtype=bool))
+        sns.heatmap(corr_matrix, mask=mask, annot=True, fmt='.3f', cmap='coolwarm',
+                    center=0, square=True, linewidths=0.5, cbar_kws={"shrink": 0.8})
+        plt.title(f'Feature Correlation Heatmap ({len(selected_features)} Selected Features)',
+                  fontsize=14, fontweight='bold')
+        plt.xticks(rotation=45, ha='right')
+        plt.yticks(rotation=0)
+        plt.tight_layout()
+        plt.savefig(os.path.join(
+            output_dir, 'feature_correlation_heatmap.png'), dpi=150)
+        plt.close()
+
+        print(
+            f"\nCorrelation heatmap saved: {output_dir}/feature_correlation_heatmap.png")
+
+    print("=" * 60)
+
+    return target_correlations, selected_features
+
+
+def feature_engineering(train_df: pd.DataFrame, test_df: Optional[pd.DataFrame] = None,
+                        output_dir: str = 'output',
+                        correlation_threshold: float = 0.95,
+                        min_target_correlation: float = 0.01) -> Tuple[pd.DataFrame, Optional[pd.DataFrame], List[str]]:
+    """
+    Complete optimized feature engineering pipeline with data-driven feature selection.
+
+    Features are automatically selected based on correlation analysis:
+    - Remove features with |correlation with target| < min_target_correlation
+    - Remove redundant features (inter-correlation > correlation_threshold)
+    - Keep features with highest correlation to target when removing redundancies
+    - Result: Dynamic feature count based on data, not hardcoded number
 
     Args:
         train_df: Training dataframe
         test_df: Optional test dataframe
+        output_dir: Directory to save correlation analysis
+        correlation_threshold: Threshold for considering features redundant
+        min_target_correlation: Minimum |correlation| with target to keep feature
 
     Returns:
         Tuple of (train_features, test_features, feature_columns)
     """
     print("=" * 60)
-    print("FEATURE ENGINEERING ( FEATURES ONLY)")
+    print("FEATURE ENGINEERING (DATA-DRIVEN SELECTION)")
     print("=" * 60)
 
     # Step 1: Extract temporal features
@@ -356,37 +485,39 @@ def feature_engineering(train_df: pd.DataFrame, test_df: Optional[pd.DataFrame] 
             {label: idx for idx, label in enumerate(le_type.classes_)}
         ).fillna(0).astype(int)
 
-    # Convert boolean IsHoliday to int
-    for col in ['IsHoliday_x', 'IsHoliday_y']:
-        if col in train_df.columns:
-            train_df[col] = train_df[col].astype(int)
-        if test_df is not None and col in test_df.columns:
-            test_df[col] = test_df[col].astype(int)
+    # Convert boolean IsHoliday to int (keep only one, rename to IsHoliday)
+    if 'IsHoliday_x' in train_df.columns:
+        train_df['IsHoliday'] = train_df['IsHoliday_x'].astype(int)
+        train_df = train_df.drop(
+            columns=['IsHoliday_x', 'IsHoliday_y'], errors='ignore')
+    elif 'IsHoliday_y' in train_df.columns:
+        train_df['IsHoliday'] = train_df['IsHoliday_y'].astype(int)
+        train_df = train_df.drop(columns=['IsHoliday_y'], errors='ignore')
 
-    # Define  feature columns only (16 features)
-    feature_cols = [
-        # Store and Dept
-        'Store', 'Dept', 'Size', 'Type_encoded',
+    if test_df is not None:
+        if 'IsHoliday_x' in test_df.columns:
+            test_df['IsHoliday'] = test_df['IsHoliday_x'].astype(int)
+            test_df = test_df.drop(
+                columns=['IsHoliday_x', 'IsHoliday_y'], errors='ignore')
+        elif 'IsHoliday_y' in test_df.columns:
+            test_df['IsHoliday'] = test_df['IsHoliday_y'].astype(int)
+            test_df = test_df.drop(columns=['IsHoliday_y'], errors='ignore')
 
-        # Temporal features
-        'Year', 'Month', 'Week', 'Day', 'DayOfYear', 'Quarter', 'Season',
+    # Step 3: Analyze correlations and automatically select features
+    print("\nStep 3: Analyzing correlations and selecting features...")
+    correlations, feature_cols = analyze_feature_correlations(
+        train_df, output_dir,
+        correlation_threshold=correlation_threshold,
+        min_target_correlation=min_target_correlation
+    )
 
-        # Economic indicators
-        'Temperature', 'Fuel_Price', 'CPI', 'Unemployment',
-
-        # Markdown features
-        'MarkDown1', 'MarkDown2', 'MarkDown3', 'MarkDown4', 'MarkDown5',
-        'hasMarkDown1', 'hasMarkDown2', 'hasMarkDown3', 'hasMarkDown4', 'hasMarkDown5',
-
-        # Holiday
-        'IsHoliday_x'
-    ]
-
-    # Filter to only include columns that exist in the dataframe
-    feature_cols = [col for col in feature_cols if col in train_df.columns]
+    # Feature selection is now data-driven based on:
+    # 1. Correlation with Weekly_Sales (must be >= min_target_correlation)
+    # 2. Inter-feature correlation (must be <= correlation_threshold)
+    # The analyze_feature_correlations function returns the optimal feature set
 
     # Handle missing values
-    print("Step 3: Handling missing values...")
+    print("\nStep 4: Handling missing values...")
     for col in feature_cols:
         if col in train_df.columns:
             train_df[col] = train_df[col].fillna(0)
@@ -718,7 +849,7 @@ def main():
 
     # Step 3: Feature Engineering
     train_fe, test_fe, feature_cols = feature_engineering(
-        merged_train, test_prepared)
+        merged_train, test_prepared, output_dir)
 
     # Step 4: Prepare data for modeling
     print("Preparing data for modeling...")
