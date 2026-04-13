@@ -32,8 +32,8 @@ This module implements two storage components of the big data pipeline:
        v
  +---------------------+
  | Spark Processing     |  Reads from HDFS /preprocessed/
- |                      |  Joins, Spark SQL, MLlib
- |                      |  Writes to HDFS /enriched/
+ | (Spark_Analysis_     |  Joins, Spark SQL, MLlib
+ |  ML.ipynb)           |  Writes to HDFS /enriched/
  +---------------------+
        |
        v
@@ -268,6 +268,8 @@ mongodb_load/
     mongodb_data_load.py        # Preprocessed data loading + verification
 
 README_HDFS_MongoDB.md          # This file
+
+Spark_Analysis_ML.ipynb         # Spark-based data processing & ML pipeline
 ```
 
 ## Docker Compose Quick Start

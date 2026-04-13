@@ -46,7 +46,11 @@ python sales_forecasting.py
 # 5. Exit the container when done
 exit
 
-# 6. Stop all services
+# 6. (Optional) Run Spark-based Processing and ML
+# If you want to use the Spark-based pipeline for large-scale analysis:
+jupyter notebook Spark_Analysis_ML.ipynb
+
+# 7. Stop all services
 docker-compose down
 ```
 
