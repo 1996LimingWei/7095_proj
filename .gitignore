@@ -1,0 +1,21 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Data files (Large datasets from Kaggle - ignore raw data but keep preprocessed)
+data/*.csv
+data/*.parquet
+!data/preprocessed/
+data/preprocessed/*.csv
+
+# Backup / Archive files
+*.zip
+*.tar.gz
+
+# Environment files
+.ipynb_checkpoints/
+
+# System files
+.DS_Store
+Thumbs.db
